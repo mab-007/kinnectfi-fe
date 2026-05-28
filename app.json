@@ -28,12 +28,25 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to quickly and securely unlock Kinnectfi."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
           "imageWidth": 180,
           "resizeMode": "contain",
           "backgroundColor": "#F4EFE7"
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "ios": { "deploymentTarget": "17.5" }
         }
       ]
     ]

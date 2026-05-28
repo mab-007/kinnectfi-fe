@@ -14,12 +14,12 @@ export default function Done() {
         <View style={styles.check}>
           <Text style={styles.checkMark}>✓</Text>
         </View>
-        <Text style={styles.title}>Number verified.</Text>
+        <Text style={styles.title}>You're all set for now.</Text>
         <Text style={styles.sub}>
-          You're past the front door. The rest of onboarding — PIN, name, ID
-          check, address — lands as we build those backend steps.
+          Account created, PIN locked in, name on file, and terms accepted. The ID
+          check (KYC) and your money features land as we build those next.
         </Text>
-        <Text style={styles.badge}>onboarding step: {step ?? "otp_verified"}</Text>
+        <Text style={styles.badge}>onboarding step: {step ?? "tos_accepted"}</Text>
       </View>
 
       <Button
