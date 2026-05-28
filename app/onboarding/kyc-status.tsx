@@ -12,6 +12,7 @@ export default function KycStatus() {
   const router = useRouter();
   const [state, setState] = useState<KycState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -24,6 +25,7 @@ export default function KycStatus() {
         const s = await api.refreshKyc();
         if (cancelled.current) return;
         setState(s);
+        setError(null);
         const step = s.onboardingStep;
         if (step === "complete" || step === "kyc_approved" || step === "provisioning") {
           router.replace("/onboarding/done");
@@ -43,7 +45,15 @@ export default function KycStatus() {
       cancelled.current = true;
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [retryKey]);
+
+  // Re-arm the poll loop in place. router.replace() to the same route doesn't
+  // remount the screen, so the effect never re-fired — bumping retryKey does.
+  function retry() {
+    setError(null);
+    setState(null);
+    setRetryKey((k) => k + 1);
+  }
 
   function resume() {
     if (!state?.completionLink) return;
@@ -103,11 +113,7 @@ export default function KycStatus() {
       ) : needsAction && state?.completionLink ? (
         <Button label="Resume verification" onPress={resume} style={{ marginBottom: spacing.md }} />
       ) : error ? (
-        <Button
-          label="Try again"
-          onPress={() => router.replace("/onboarding/kyc-status")}
-          style={{ marginBottom: spacing.md }}
-        />
+        <Button label="Try again" onPress={retry} style={{ marginBottom: spacing.md }} />
       ) : null}
     </Screen>
   );

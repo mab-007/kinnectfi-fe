@@ -107,7 +107,10 @@ export default function Kyc() {
     };
     try {
       const res = await api.startKyc(body, idempotencyKey);
-      if (res.completionLink) {
+      // Only open the hosted Sumsub WebView when verification is actually needed.
+      // An already-approved application (e.g. sandbox auto-approve) skips straight
+      // to the status screen, which advances us to complete.
+      if (res.completionLink && res.status !== "approved") {
         router.replace({
           pathname: "/onboarding/kyc-verify",
           params: {

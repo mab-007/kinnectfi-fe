@@ -44,6 +44,13 @@
       ],
       "expo-web-browser",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Kinnectfi uses your camera to verify your identity (ID scan and selfie).",
+          "microphonePermission": "Kinnectfi uses your microphone during identity verification."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": { "deploymentTarget": "17.5" }
