@@ -57,7 +57,8 @@ export default function Biometric() {
   }, []);
 
   function goToDone() {
-    router.replace({ pathname: "/onboarding/done", params: { step: "tos_accepted" } });
+    // Next gate after the (optional) biometric prompt is KYC.
+    router.replace("/onboarding/kyc");
   }
 
   async function onEnable() {

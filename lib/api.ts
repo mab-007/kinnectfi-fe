@@ -58,6 +58,42 @@ export interface OnboardingState {
   legal: { version: string; termsUrl: string; privacyUrl: string };
 }
 
+export interface KycCompletionLink {
+  url: string;
+  params: Record<string, string>;
+}
+
+export interface KycState {
+  onboardingStep: string;
+  status: string;
+  rainStatus: string | null;
+  completionLink: KycCompletionLink | null;
+  reason: string | null;
+}
+
+export interface KycAddress {
+  line1: string;
+  line2?: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  countryCode: string;
+  country: string;
+}
+
+export interface StartKycBody {
+  ssn: string;
+  email?: string;
+  phoneCountryCode: string;
+  phoneNumber: string;
+  occupation: string;
+  annualSalary: string;
+  accountPurpose: string;
+  expectedMonthlyVolume: string;
+  iovationBlackbox: string;
+  address: KycAddress;
+}
+
 // Non-crypto UUID v4. Good enough for an idempotency key (needs uniqueness, not
 // secrecy) and avoids the RN `crypto.getRandomValues` polyfill footgun.
 export function newIdempotencyKey(): string {
@@ -166,4 +202,17 @@ export const api = {
     }),
 
   getState: () => request<OnboardingState>("/v1/onboarding/state", { auth: true }),
+
+  startKyc: (body: StartKycBody, idempotencyKey: string) =>
+    request<KycState>("/v1/onboarding/kyc/start", {
+      method: "POST",
+      body,
+      auth: true,
+      idempotencyKey,
+    }),
+
+  refreshKyc: () =>
+    request<KycState>("/v1/onboarding/kyc/refresh", { method: "POST", auth: true }),
+
+  getKycState: () => request<KycState>("/v1/onboarding/kyc/state", { auth: true }),
 };

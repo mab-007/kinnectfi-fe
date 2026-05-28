@@ -12,7 +12,12 @@ export function stepToRoute(step: string): string {
     case "name_captured":
       return "/onboarding/tos";
     case "tos_accepted":
+      // Biometric is offered inline after ToS (non-gating); on resume go straight
+      // to the real next gate, KYC.
+      return "/onboarding/kyc";
     case "kyc_submitted":
+    case "kyc_rejected":
+      return "/onboarding/kyc-status";
     case "kyc_approved":
     case "provisioning":
     case "complete":

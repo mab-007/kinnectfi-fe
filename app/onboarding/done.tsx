@@ -14,12 +14,12 @@ export default function Done() {
         <View style={styles.check}>
           <Text style={styles.checkMark}>✓</Text>
         </View>
-        <Text style={styles.title}>You're all set for now.</Text>
+        <Text style={styles.title}>You're verified and ready.</Text>
         <Text style={styles.sub}>
-          Account created, PIN locked in, name on file, and terms accepted. The ID
-          check (KYC) and your money features land as we build those next.
+          Identity confirmed and your account is active. Adding money, sending to
+          family, and your card land as we build those next.
         </Text>
-        <Text style={styles.badge}>onboarding step: {step ?? "tos_accepted"}</Text>
+        <Text style={styles.badge}>onboarding step: {step ?? "complete"}</Text>
       </View>
 
       <Button
