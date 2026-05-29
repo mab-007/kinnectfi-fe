@@ -20,8 +20,11 @@ export function stepToRoute(step: string): string {
       return "/onboarding/kyc-status";
     case "kyc_approved":
     case "provisioning":
-    case "complete":
+      // Just finished — show the celebration (which links on to /home).
       return "/onboarding/done";
+    case "complete":
+      // Fully onboarded returning user → straight into the app.
+      return "/home";
     default: // signup_started / otp_verified
       return "/onboarding/pin";
   }

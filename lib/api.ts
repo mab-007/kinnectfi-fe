@@ -125,7 +125,12 @@ async function request<T>(
   path: string,
   opts: { method?: string; body?: unknown; auth?: boolean; idempotencyKey?: string } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  // Only declare a JSON content-type when there's actually a body. Fastify
+  // rejects an empty body sent with `content-type: application/json`
+  // (FST_ERR_CTP_EMPTY_JSON_BODY → 400), which would break body-less POSTs like
+  // kyc/refresh and card freeze/unfreeze.
+  const headers: Record<string, string> = {};
+  if (opts.body !== undefined) headers["content-type"] = "application/json";
   if (opts.auth) headers.authorization = await authHeader();
   if (opts.idempotencyKey) headers["idempotency-key"] = opts.idempotencyKey;
 
@@ -159,6 +164,150 @@ async function request<T>(
   return json as T;
 }
 
+// ─── Cards (BE: src/routes/cards.ts) ─────────────────────────
+export interface CardView {
+  id: string;
+  brand: string;
+  type: string;
+  last4: string;
+  status: string; // not_activated | active | frozen | locked | canceled
+  expMonth: number;
+  expYear: number;
+  cardholderName: string;
+  frozenByUser: boolean;
+  issuedAt: string;
+}
+export interface CardsResponse {
+  cards: CardView[];
+  canIssue: boolean;
+}
+export interface CardStatusResponse {
+  id: string;
+  status: string;
+}
+export interface ActivationResult {
+  id: string;
+  status: string;
+  onlineTransactionsEnabled: boolean;
+}
+export interface RevealSession {
+  mode: "hosted_iframe" | "client_decrypt";
+  revealUrl?: string;
+  encryptedPayload?: string;
+  encryptedKey?: string;
+  iv?: string;
+  expiresAt: string;
+  ttlSec: number;
+}
+export type ReplaceReason = "lost" | "stolen" | "compromised" | "damaged";
+
+export interface CardTxnView {
+  id: string;
+  kind: "card_authz" | "card_settle";
+  status: "authorized" | "settled" | "reversed" | "failed";
+  amount: string; // minor units
+  currency: string;
+  merchant: { name?: string; mcc?: string; city?: string; country?: string };
+  authorizedAmount?: string;
+  settledAmount?: string;
+  decision: "approved" | "declined";
+  declineReason?: string | null;
+  occurredAt: string;
+}
+export interface CardTransactionsResponse {
+  transactions: CardTxnView[];
+  nextCursor: string | null;
+}
+
+// ─── Fund-in (BE: src/routes/fund-in.ts) ─────────────────────
+export interface LimitsBlock {
+  perTransactionMax: string | null;
+  perDayRemaining: string;
+  perMonthRemaining: string;
+  currency: string;
+  decimals: number;
+}
+export interface FundInMethod {
+  kind: "ach_push" | "crypto_deposit";
+  available: boolean;
+  ineligibleReason: string | null;
+  limits: LimitsBlock;
+  settlementEstimate: string;
+}
+export interface FundInMethodsResponse {
+  userId: string;
+  methods: FundInMethod[];
+}
+export interface AchAccountResponse {
+  achAccount: {
+    routingNumber: string;
+    accountNumber: string;
+    accountNumberLast4: string;
+    accountHolderName: string;
+    bankPartnerName: string;
+  };
+  limits: LimitsBlock;
+  instructions: string;
+  settlementEstimate: string;
+}
+export interface WalletAddressResponse {
+  cryptoAddress: {
+    chain: string;
+    address: string;
+    qrPayload: string;
+    token: string;
+    tokenContractAddress: string;
+  };
+  limits: LimitsBlock;
+  warnings: string[];
+}
+
+// ─── Ledger (BE: src/routes/ledger.ts) ───────────────────────
+export interface BalanceResponse {
+  userId: string;
+  balances: { kind: string; currency: string; balance: string; decimals: number }[];
+  totals: { spendableUsdc: string; totalUsdc: string; decimals: number };
+  asOf: string;
+}
+export interface TxView {
+  id: string;
+  kind: string;
+  status: string;
+  grossAmount: string;
+  currency: string;
+  vendor: string | null;
+  vendorExternalId: string | null;
+  relatedTransactionId: string | null;
+  initiatedAt: string;
+  settledAt: string | null;
+  completedAt: string | null;
+  metadata: Record<string, unknown>;
+}
+export interface TransactionsResponse {
+  transactions: TxView[];
+  nextCursor: string | null;
+}
+
+// ─── Yield (BE: src/routes/yield.ts) ─────────────────────────
+export interface YieldStatusResponse {
+  enabled: boolean; // counsel gate — false ⇒ render "coming soon"
+  eligible: boolean; // KYC approved + active wallet
+  hasPosition: boolean;
+  principalMinor: string; // cost basis
+  currentValueMinor: string; // live vault value
+  accruedMinor: string; // currentValue − principal
+  availableMinor: string; // deposit headroom
+  indicativeApyBps: number;
+  vaultName: string;
+  currency: string;
+}
+export interface YieldMoveResponse {
+  transactionId: string;
+  principalMinor: string;
+  currentValueMinor: string;
+  status: string; // active | closed
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
 
@@ -166,6 +315,15 @@ export const api = {
     request<SignupResponse>("/v1/onboarding/signup", {
       method: "POST",
       body,
+      auth: true,
+    }),
+
+  // BE-issued OTP step — only used in fake mode (Privy verifies the contact at
+  // login, so the Privy path skips straight past this).
+  verifyOtp: (otpChallengeId: string, code: string) =>
+    request<SetPinResponse>("/v1/onboarding/verify-otp", {
+      method: "POST",
+      body: { otpChallengeId, code },
       auth: true,
     }),
 
@@ -215,4 +373,73 @@ export const api = {
     request<KycState>("/v1/onboarding/kyc/refresh", { method: "POST", auth: true }),
 
   getKycState: () => request<KycState>("/v1/onboarding/kyc/state", { auth: true }),
+
+  // ── Cards ──
+  getCards: () => request<CardsResponse>("/v1/cards", { auth: true }),
+  issueCard: (idempotencyKey: string) =>
+    request<{ card: CardView }>("/v1/cards/issue", { method: "POST", auth: true, idempotencyKey }),
+  activateCard: (id: string, enableOnlineTransactions: boolean) =>
+    request<ActivationResult>(`/v1/cards/${id}/activate`, {
+      method: "POST",
+      body: { enableOnlineTransactions },
+      auth: true,
+    }),
+  freezeCard: (id: string) =>
+    request<CardStatusResponse>(`/v1/cards/${id}/freeze`, { method: "POST", auth: true }),
+  unfreezeCard: (id: string) =>
+    request<CardStatusResponse>(`/v1/cards/${id}/unfreeze`, { method: "POST", auth: true }),
+  revealCard: (id: string, pin: string, deviceId?: string) =>
+    request<RevealSession>(`/v1/cards/${id}/reveal-session`, {
+      method: "POST",
+      body: { pin, deviceId },
+      auth: true,
+    }),
+  replaceCard: (id: string, pin: string, reason: ReplaceReason, idempotencyKey: string) =>
+    request<{ card: CardView; replacedCardId: string }>(`/v1/cards/${id}/replace`, {
+      method: "POST",
+      body: { pin, reason },
+      auth: true,
+      idempotencyKey,
+    }),
+  getCardTransactions: (id: string, query?: { limit?: number; cursor?: string }) => {
+    const qs = new URLSearchParams();
+    if (query?.limit) qs.set("limit", String(query.limit));
+    if (query?.cursor) qs.set("cursor", query.cursor);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<CardTransactionsResponse>(`/v1/cards/${id}/transactions${suffix}`, { auth: true });
+  },
+
+  // ── Fund-in ──
+  getFundInMethods: () => request<FundInMethodsResponse>("/v1/fund-in/methods", { auth: true }),
+  getFundInAccount: () => request<AchAccountResponse>("/v1/fund-in/account", { auth: true }),
+  getWalletAddress: () => request<WalletAddressResponse>("/v1/fund-in/wallet-address", { auth: true }),
+  getFundInLimits: () => request<LimitsBlock>("/v1/fund-in/limits", { auth: true }),
+
+  // ── Yield ──
+  getYield: () => request<YieldStatusResponse>("/v1/yield", { auth: true }),
+  yieldDeposit: (amountMinor: string, idempotencyKey: string) =>
+    request<YieldMoveResponse>("/v1/yield/deposit", {
+      method: "POST",
+      body: { amountMinor },
+      auth: true,
+      idempotencyKey,
+    }),
+  yieldWithdraw: (args: { amountMinor?: string; all?: boolean }, idempotencyKey: string) =>
+    request<YieldMoveResponse>("/v1/yield/withdraw", {
+      method: "POST",
+      body: args,
+      auth: true,
+      idempotencyKey,
+    }),
+
+  // ── Ledger ──
+  getBalance: () => request<BalanceResponse>("/v1/balance", { auth: true }),
+  getTransactions: (query?: { limit?: number; cursor?: string; kind?: string[] }) => {
+    const qs = new URLSearchParams();
+    if (query?.limit) qs.set("limit", String(query.limit));
+    if (query?.cursor) qs.set("cursor", query.cursor);
+    for (const k of query?.kind ?? []) qs.append("kind", k);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<TransactionsResponse>(`/v1/transactions${suffix}`, { auth: true });
+  },
 };

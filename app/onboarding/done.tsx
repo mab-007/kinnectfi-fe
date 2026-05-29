@@ -22,12 +22,10 @@ export default function Done() {
         <Text style={styles.badge}>onboarding step: {step ?? "complete"}</Text>
       </View>
 
-      <Button
-        label="Start over"
-        variant="ghost"
-        onPress={() => router.replace("/")}
-        style={{ marginBottom: spacing.md }}
-      />
+      <View style={{ gap: spacing.xs, marginBottom: spacing.md }}>
+        <Button label="Go to my account" onPress={() => router.replace("/home")} />
+        <Button label="Start over" variant="ghost" onPress={() => router.replace("/")} />
+      </View>
     </Screen>
   );
 }

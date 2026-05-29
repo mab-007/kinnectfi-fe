@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { registerTokenGetter } from "@/lib/privy";
+import { bootDevSession, useSession } from "@/lib/session";
 import { colors } from "@/lib/theme";
 
 const PRIVY_APP_ID = process.env.EXPO_PUBLIC_PRIVY_APP_ID ?? "";
@@ -19,9 +20,10 @@ function TokenBridge() {
   return null;
 }
 
-// Hold rendering until the Privy SDK has initialized (restoring any session).
+// Hold rendering until the session is ready (Privy SDK init, or the dev-session
+// restore in fake mode) so screens don't flash before we know the auth state.
 function Gate({ children }: { children: React.ReactNode }) {
-  const { isReady } = usePrivy();
+  const { isReady } = useSession();
   if (!isReady) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg }}>
@@ -33,6 +35,11 @@ function Gate({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  // Restore the dev session (fake mode) once on boot; no-op in Privy mode.
+  useEffect(() => {
+    void bootDevSession();
+  }, []);
+
   return (
     <PrivyProvider
       appId={PRIVY_APP_ID}

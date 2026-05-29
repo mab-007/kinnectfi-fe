@@ -14,6 +14,7 @@ import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
 import { api, ApiError } from "@/lib/api";
 import { stepToRoute } from "@/lib/onboarding";
+import { devUserIdForEmail, isFakeAuth, setDevSession } from "@/lib/session";
 import { colors, fonts, radius, spacing } from "@/lib/theme";
 
 const E164 = /^\+[1-9]\d{7,14}$/;
@@ -36,19 +37,27 @@ export default function Contact() {
 
   // Already authenticated (e.g. persisted Privy session) — don't try to log in
   // again (Privy errors "already logged in"). Bounce to the entry gate, which
-  // resumes the user at their correct onboarding step.
+  // resumes the user at their correct onboarding step. FAKE mode ignores any
+  // leftover Privy session (from an earlier real run) so it can't hijack the dev
+  // bypass and loop signup back to Welcome.
   useEffect(() => {
-    if (user) router.replace("/");
+    if (!isFakeAuth && user) router.replace("/");
   }, [user]);
   const [phase, setPhase] = useState<"input" | "code">("input");
   const [phone, setPhone] = useState("+1");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
+  // Dev bypass: prefill a dummy email + the fixed fake OTP so a test run needs
+  // no real inbox/SMS. The BE FakeAuthAdapter accepts code `000000`.
+  const [email, setEmail] = useState(isFakeAuth ? "dev@kinnectfi.test" : "");
+  const [code, setCode] = useState(isFakeAuth ? "000000" : "");
   const [error, setError] = useState<string | null>(null);
+  const [otpChallengeId, setOtpChallengeId] = useState<string | null>(null);
+  const [devBusy, setDevBusy] = useState(false);
 
   const flow = method === "sms" ? sms : emailLogin;
   const busy =
-    flow.state.status === "sending-code" || flow.state.status === "submitting-code";
+    devBusy ||
+    flow.state.status === "sending-code" ||
+    flow.state.status === "submitting-code";
   const inputValid =
     method === "sms" ? E164.test(phone.trim()) : EMAIL.test(email.trim());
   const codeValid = /^\d{6}$/.test(code);
@@ -64,6 +73,22 @@ export default function Contact() {
 
   async function onSendCode() {
     setError(null);
+    // Dev bypass: no real OTP send. Establish a `fake:<id>` session, then create
+    // the user via signup so the BE issues a (always-`000000`) challenge.
+    if (isFakeAuth) {
+      setDevBusy(true);
+      try {
+        await setDevSession(devUserIdForEmail(email.trim()));
+        const res = await api.signup({ email: email.trim(), deviceId: `${Platform.OS}-fake` });
+        setOtpChallengeId(res.otpChallengeId ?? null);
+        setPhase("code");
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Couldn't start the dev sign-in.");
+      } finally {
+        setDevBusy(false);
+      }
+      return;
+    }
     try {
       if (method === "sms") await sms.sendCode({ phone: phone.trim() });
       else await emailLogin.sendCode({ email: email.trim() });
@@ -75,6 +100,23 @@ export default function Contact() {
 
   async function onLogin() {
     setError(null);
+    // Dev bypass: verify the BE-issued OTP directly (no Privy round trip).
+    if (isFakeAuth) {
+      if (!otpChallengeId) {
+        setError("Send the code first.");
+        return;
+      }
+      setDevBusy(true);
+      try {
+        const res = await api.verifyOtp(otpChallengeId, code);
+        router.replace(stepToRoute(res.user.onboardingStep));
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "That code didn't work. Try again.");
+      } finally {
+        setDevBusy(false);
+      }
+      return;
+    }
     try {
       const user =
         method === "sms"
@@ -111,26 +153,34 @@ export default function Contact() {
         <View style={styles.flex}>
           {phase === "input" ? (
             <>
-              <View style={styles.toggle}>
-                <Pressable
-                  style={[styles.toggleBtn, method === "sms" && styles.toggleBtnActive]}
-                  onPress={() => switchMethod("sms")}
-                >
-                  <Text style={[styles.toggleText, method === "sms" && styles.toggleTextActive]}>
-                    Phone
+              {isFakeAuth ? (
+                <View style={styles.devBanner}>
+                  <Text style={styles.devBannerText}>
+                    DEV MODE — Privy bypassed. Sign in with any email; the code is 000000.
                   </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.toggleBtn, method === "email" && styles.toggleBtnActive]}
-                  onPress={() => switchMethod("email")}
-                >
-                  <Text style={[styles.toggleText, method === "email" && styles.toggleTextActive]}>
-                    Email
-                  </Text>
-                </Pressable>
-              </View>
+                </View>
+              ) : (
+                <View style={styles.toggle}>
+                  <Pressable
+                    style={[styles.toggleBtn, method === "sms" && styles.toggleBtnActive]}
+                    onPress={() => switchMethod("sms")}
+                  >
+                    <Text style={[styles.toggleText, method === "sms" && styles.toggleTextActive]}>
+                      Phone
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toggleBtn, method === "email" && styles.toggleBtnActive]}
+                    onPress={() => switchMethod("email")}
+                  >
+                    <Text style={[styles.toggleText, method === "email" && styles.toggleTextActive]}>
+                      Email
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
 
-              {method === "sms" ? (
+              {method === "sms" && !isFakeAuth ? (
                 <>
                   <Text style={styles.title}>What's your number?</Text>
                   <Text style={styles.sub}>
@@ -190,7 +240,7 @@ export default function Contact() {
             label="Send code"
             onPress={onSendCode}
             disabled={!inputValid || busy}
-            loading={flow.state.status === "sending-code"}
+            loading={devBusy || flow.state.status === "sending-code"}
             style={{ marginBottom: spacing.md }}
           />
         ) : (
@@ -198,7 +248,7 @@ export default function Contact() {
             label="Verify"
             onPress={onLogin}
             disabled={!codeValid || busy}
-            loading={flow.state.status === "submitting-code"}
+            loading={devBusy || flow.state.status === "submitting-code"}
             style={{ marginBottom: spacing.md }}
           />
         )}
@@ -209,6 +259,15 @@ export default function Contact() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  devBanner: {
+    backgroundColor: colors.field,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  devBannerText: { fontSize: 12, color: colors.inkSoft, textAlign: "center" },
   toggle: {
     flexDirection: "row",
     backgroundColor: colors.field,

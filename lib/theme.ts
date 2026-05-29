@@ -14,6 +14,7 @@ export const colors = {
   border: "#E4DCCE",
   field: "#FFFFFF",
   danger: "#C0492B",
+  success: "#2E7D5B",
   onPrimary: "#FFFFFF",
 };
 

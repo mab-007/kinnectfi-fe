@@ -1,4 +1,3 @@
-import { usePrivy } from "@privy-io/expo";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
@@ -6,17 +5,18 @@ import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
 import { api, ApiError } from "@/lib/api";
 import { stepToRoute } from "@/lib/onboarding";
+import { useSession } from "@/lib/session";
 import { colors, fonts, spacing } from "@/lib/theme";
 
 export default function Welcome() {
   const router = useRouter();
-  const { isReady, user, logout } = usePrivy();
+  const { isReady, isAuthenticated, logout } = useSession();
   const [resumeError, setResumeError] = useState<string | null>(null);
 
-  // If a Privy session already exists, skip login and resume at the right
-  // onboarding step (driven by the backend) instead of showing the entry CTA.
+  // If a session already exists, skip login and resume at the right onboarding
+  // step (driven by the backend) instead of showing the entry CTA.
   useEffect(() => {
-    if (!isReady || !user) return;
+    if (!isReady || !isAuthenticated) return;
     let cancelled = false;
     api
       .getState()
@@ -31,10 +31,10 @@ export default function Welcome() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, user]);
+  }, [isReady, isAuthenticated]);
 
-  // Booting Privy, or logged in and resuming → spinner (no CTA flash).
-  if (!isReady || (user && !resumeError)) {
+  // Booting, or logged in and resuming → spinner (no CTA flash).
+  if (!isReady || (isAuthenticated && !resumeError)) {
     return (
       <Screen>
         <View style={styles.center}>
@@ -58,7 +58,7 @@ export default function Welcome() {
         {resumeError ? <Text style={styles.error}>{resumeError}</Text> : null}
         <Text style={styles.legal}>By continuing you agree to our Terms & Privacy Notice.</Text>
         <Button label="Get started" onPress={() => router.push("/onboarding/contact")} />
-        {user ? (
+        {isAuthenticated ? (
           <Button
             label="Log out"
             variant="ghost"

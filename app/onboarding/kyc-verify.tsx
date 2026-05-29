@@ -19,6 +19,8 @@ export default function KycVerify() {
 
   const fullUrl = useMemo(() => {
     if (!url) return null;
+    // A data: URL is the dev simulated page — load it as-is (no query params).
+    if (url.startsWith("data:")) return url;
     let qs = "";
     try {
       const parsed = JSON.parse(params ?? "{}") as Record<string, string>;
@@ -30,6 +32,9 @@ export default function KycVerify() {
     }
     return qs ? `${url}?${qs}` : url;
   }, [url, params]);
+
+  // Simulated dev page (fake KYC): no real capture, so skip the camera gate.
+  const simulated = fullUrl?.startsWith("data:") ?? false;
 
   if (!fullUrl) {
     return (
@@ -48,7 +53,7 @@ export default function KycVerify() {
   }
 
   // Ask for the camera before Sumsub starts, so the in-flow capture never dead-ends.
-  if (!permission?.granted) {
+  if (!simulated && !permission?.granted) {
     const blocked = permission?.canAskAgain === false;
     return (
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
@@ -80,6 +85,8 @@ export default function KycVerify() {
         <WebView
           source={{ uri: fullUrl }}
           onLoadEnd={() => setLoading(false)}
+          onError={() => setLoading(false)}
+          onHttpError={() => setLoading(false)}
           style={styles.web}
           originWhitelist={["*"]}
           allowsInlineMediaPlayback
@@ -94,10 +101,13 @@ export default function KycVerify() {
         ) : null}
       </View>
       <View style={styles.footer}>
-        <Button
-          label="I've finished verification"
-          onPress={() => router.replace("/onboarding/kyc-status")}
-        />
+        {/* Only offer "finished" once the flow has actually loaded. */}
+        {!loading ? (
+          <Button
+            label="I've finished verification"
+            onPress={() => router.replace("/onboarding/kyc-status")}
+          />
+        ) : null}
       </View>
     </SafeAreaView>
   );
