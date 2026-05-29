@@ -8,6 +8,13 @@ export default function Done() {
   const router = useRouter();
   const { step } = useLocalSearchParams<{ step?: string }>();
 
+  // Enter the app as a fresh root: collapse the onboarding stack first so a
+  // swipe-back from inside the app can't return to Welcome / onboarding screens.
+  const goToApp = () => {
+    if (router.canDismiss()) router.dismissAll();
+    router.replace("/home");
+  };
+
   return (
     <Screen>
       <View style={styles.body}>
@@ -23,8 +30,7 @@ export default function Done() {
       </View>
 
       <View style={{ gap: spacing.xs, marginBottom: spacing.md }}>
-        <Button label="Go to my account" onPress={() => router.replace("/home")} />
-        <Button label="Start over" variant="ghost" onPress={() => router.replace("/")} />
+        <Button label="Go to my account" onPress={goToApp} />
       </View>
     </Screen>
   );

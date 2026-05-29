@@ -11,8 +11,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { api, ApiError, type BalanceResponse, type CardView, type TxView } from "@/lib/api";
 import {
+  api,
+  ApiError,
+  type BalanceResponse,
+  type CardView,
+  type TxView,
+  type YieldStatusResponse,
+} from "@/lib/api";
+import {
+  cardStatusLabel,
   formatDate,
   formatPhpFromUsdcMinor,
   formatUsdc,
@@ -22,13 +30,12 @@ import {
 } from "@/lib/format";
 import { colors, fonts, radius, spacing } from "@/lib/theme";
 
-const INCOMING = new Set(["fund_in", "crypto_deposit", "yield_accrual"]);
-
 export default function Home() {
   const router = useRouter();
   const [name, setName] = useState<{ first: string | null; last: string | null }>({ first: null, last: null });
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [card, setCard] = useState<CardView | null>(null);
+  const [yieldStatus, setYieldStatus] = useState<YieldStatusResponse | null>(null);
   const [txns, setTxns] = useState<TxView[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,16 +44,18 @@ export default function Home() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [state, bal, cards, history] = await Promise.all([
+      const [state, bal, cards, history, yld] = await Promise.all([
         api.getState(),
         api.getBalance(),
         api.getCards(),
         api.getTransactions({ limit: 6 }),
+        api.getYield().catch(() => null),
       ]);
       setName({ first: state.user.legalFirstName, last: state.user.legalLastName });
       setBalance(bal);
       setCard(cards.cards.find((c) => c.status !== "canceled") ?? null);
       setTxns(history.transactions);
+      setYieldStatus(yld);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Couldn't load your account.");
     } finally {
@@ -77,6 +86,14 @@ export default function Home() {
   const spendable = balance?.totals.spendableUsdc ?? "0";
   const firstName = name.first ?? "there";
 
+  // Save tile: real saved value when the user has a position, otherwise the
+  // indicative rate as a hook. Never a hardcoded $0.00.
+  const apyPct = yieldStatus ? (yieldStatus.indicativeApyBps / 100).toFixed(1) : "5";
+  const saveTile =
+    yieldStatus?.enabled && yieldStatus.hasPosition
+      ? { amount: formatUsdc(yieldStatus.currentValueMinor), sub: `Saved · ~${apyPct}% APY` }
+      : { amount: `~${apyPct}%`, sub: yieldStatus?.enabled ? "Tap to start earning" : "Coming soon" };
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView
@@ -89,7 +106,7 @@ export default function Home() {
             <Text style={styles.eyebrow}>MAGANDANG ARAW</Text>
             <Text style={styles.name}>{firstName}</Text>
           </View>
-          <Pressable style={styles.avatar} onPress={() => router.push("/profile")} hitSlop={8}>
+          <Pressable style={styles.avatar} onPress={() => router.push("/menu")} hitSlop={8}>
             <Text style={styles.avatarText}>{initialsOf(name.first, name.last)}</Text>
           </Pressable>
         </View>
@@ -112,7 +129,7 @@ export default function Home() {
               <Ionicons name="add" size={18} color={colors.onPrimary} />
               <Text style={styles.actionPrimaryText}>Add money</Text>
             </Pressable>
-            <Pressable style={[styles.action, styles.actionGhost]} onPress={() => router.push("/send")}>
+            <Pressable style={[styles.action, styles.actionGhost]} onPress={() => router.navigate("/send")}>
               <Ionicons name="paper-plane-outline" size={16} color={colors.onPrimary} />
               <Text style={styles.actionGhostText}>Send</Text>
             </Pressable>
@@ -123,21 +140,21 @@ export default function Home() {
 
         {/* Card + Save mini tiles */}
         <View style={styles.tiles}>
-          <Pressable style={styles.tile} onPress={() => router.push("/card")}>
+          <Pressable style={styles.tile} onPress={() => router.navigate("/card")}>
             <View style={styles.tileTop}>
               <Text style={styles.tileLabel}>CARD</Text>
               <Ionicons name="card-outline" size={16} color={colors.inkFaint} />
             </View>
-            <Text style={styles.tileAmount}>{card ? "$0.00" : "—"}</Text>
-            <Text style={styles.tileSub}>{card ? "Spent this month" : "Setting up"}</Text>
+            <Text style={styles.tileAmount}>{card ? `•• ${card.last4}` : "Get a card"}</Text>
+            <Text style={styles.tileSub}>{card ? cardStatusLabel(card.status) : "Tap to set up"}</Text>
           </Pressable>
-          <Pressable style={styles.tile} onPress={() => router.push("/save")}>
+          <Pressable style={styles.tile} onPress={() => router.navigate("/save")}>
             <View style={styles.tileTop}>
-              <Text style={styles.tileLabel}>SAVE · 5%</Text>
+              <Text style={styles.tileLabel}>SAVE</Text>
               <Ionicons name="trending-up" size={16} color={colors.primary} />
             </View>
-            <Text style={styles.tileAmount}>$0.00</Text>
-            <Text style={styles.tileSub}>Tap Save tab to earn</Text>
+            <Text style={styles.tileAmount}>{saveTile.amount}</Text>
+            <Text style={styles.tileSub}>{saveTile.sub}</Text>
           </Pressable>
         </View>
 
@@ -145,7 +162,7 @@ export default function Home() {
         <View style={styles.activityHeader}>
           <Text style={styles.sectionTitle}>Recent activity</Text>
           {txns.length > 0 ? (
-            <Pressable onPress={() => router.push("/activity")}>
+            <Pressable onPress={() => router.navigate("/activity")}>
               <Text style={styles.seeAll}>See all</Text>
             </Pressable>
           ) : null}
@@ -156,9 +173,9 @@ export default function Home() {
           </View>
         ) : (
           txns.map((t) => {
-            const incoming = INCOMING.has(t.kind);
+            const incoming = t.direction === "credit";
             return (
-              <View key={t.id} style={styles.txRow}>
+              <Pressable key={t.id} style={styles.txRow} onPress={() => router.push(`/tx/${t.id}`)}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.txLabel}>{txLabel(t.kind)}</Text>
                   <Text style={styles.txMeta}>
@@ -169,7 +186,7 @@ export default function Home() {
                   {incoming ? "+" : "-"}
                   {formatUsdc(t.grossAmount)}
                 </Text>
-              </View>
+              </Pressable>
             );
           })
         )}
@@ -244,7 +261,7 @@ const styles = StyleSheet.create({
   txLabel: { fontSize: 15, color: colors.ink },
   txMeta: { fontSize: 12, color: colors.inkFaint, marginTop: 2, textTransform: "capitalize" },
   txAmount: { fontSize: 15, fontWeight: "600" },
-  txIn: { color: colors.ink },
+  txIn: { color: colors.success },
   txOut: { color: colors.inkSoft },
   error: { color: colors.danger, fontSize: 13 },
 });

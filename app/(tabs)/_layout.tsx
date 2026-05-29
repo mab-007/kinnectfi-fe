@@ -23,7 +23,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="send" options={{ title: "Send", tabBarIcon: icon("paper-plane-outline") }} />
       <Tabs.Screen name="card" options={{ title: "Card", tabBarIcon: icon("card-outline") }} />
       <Tabs.Screen name="save" options={{ title: "Save", tabBarIcon: icon("trending-up-outline") }} />
-      <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("ellipsis-horizontal") }} />
+      <Tabs.Screen name="activity" options={{ title: "Activity", tabBarIcon: icon("time-outline") }} />
     </Tabs>
   );
 }

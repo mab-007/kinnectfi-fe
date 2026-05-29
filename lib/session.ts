@@ -7,6 +7,7 @@
 import * as SecureStore from "expo-secure-store";
 import { usePrivy } from "@privy-io/expo";
 import { useSyncExternalStore } from "react";
+import { relock, setAppLockEnabled } from "./applock";
 
 export const AUTH_MODE = (process.env.EXPO_PUBLIC_AUTH_MODE ?? "privy") as "privy" | "fake";
 export const isFakeAuth = AUTH_MODE === "fake";
@@ -63,6 +64,8 @@ async function clearDevSession(): Promise<void> {
   } catch {
     // ignore
   }
+  await setAppLockEnabled(false);
+  relock();
   emit();
 }
 
@@ -102,6 +105,8 @@ export function useSession(): Session {
     isReady: privy.isReady,
     isAuthenticated: Boolean(privy.user),
     logout: async () => {
+      await setAppLockEnabled(false);
+      relock();
       await privy.logout();
     },
   };

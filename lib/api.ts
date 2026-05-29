@@ -191,11 +191,14 @@ export interface ActivationResult {
   onlineTransactionsEnabled: boolean;
 }
 export interface RevealSession {
-  mode: "hosted_iframe" | "client_decrypt";
+  mode: "hosted_iframe" | "client_decrypt" | "plaintext";
   revealUrl?: string;
   encryptedPayload?: string;
   encryptedKey?: string;
   iv?: string;
+  pan?: string;
+  cvc?: string;
+  expiry?: string;
   expiresAt: string;
   ttlSec: number;
 }
@@ -272,6 +275,7 @@ export interface BalanceResponse {
 export interface TxView {
   id: string;
   kind: string;
+  direction: "credit" | "debit";
   status: string;
   grossAmount: string;
   currency: string;
@@ -286,6 +290,10 @@ export interface TxView {
 export interface TransactionsResponse {
   transactions: TxView[];
   nextCursor: string | null;
+}
+export interface TransactionDetail {
+  transaction: TxView;
+  timeline: { description: string; postedAt: string }[];
 }
 
 // ─── Yield (BE: src/routes/yield.ts) ─────────────────────────
@@ -306,6 +314,98 @@ export interface YieldMoveResponse {
   principalMinor: string;
   currentValueMinor: string;
   status: string; // active | closed
+}
+
+// ─── Remit (BE: src/routes/remit.ts) ─────────────────────────
+export interface RemitFees {
+  transfiFeeUsdc: string; // USDC minor (6dp)
+  ourFeeUsdc: string;
+  totalFeeUsdc: string;
+}
+export interface RemitQuote {
+  id: string;
+  destRail: string;
+  destHandle: string;
+  destRecipientName: string | null;
+  amountUsdc: string; // total the sender pays, USDC minor (6dp), fee-inclusive
+  amountPhp: string; // PHP minor (2dp)
+  recipientGetsPhp: string; // == amountPhp
+  fees: RemitFees;
+  fxRate: string; // USD→PHP effective rate
+  fxRateInverted: string;
+  settlementEstimate: string;
+  status: string; // active | confirming | confirmed | expired | canceled
+  expiresAt: string;
+  expiresInSec: number;
+}
+export interface RemitLimits {
+  perTransactionMax: string;
+  perDayRemaining: string;
+  perMonthRemaining: string;
+  currency: string;
+  decimals: number;
+}
+export interface RemitDestinationHandleField {
+  key: string;
+  label: string;
+  kind: "select" | "string";
+  validation?: string;
+  options?: { value: string; label: string }[];
+}
+export interface RemitDestinationHandle {
+  kind: string; // ph_mobile | ph_bank_account
+  placeholder?: string;
+  validation?: string;
+  fields?: RemitDestinationHandleField[];
+}
+export interface RemitDestination {
+  rail: string; // gcash | maya | bank_instapay
+  label: string;
+  icon: string;
+  handle: RemitDestinationHandle;
+  available: boolean;
+  ineligibleReason: string | null;
+  settlementEstimate: string;
+  perTransactionMaxPhp: string | null;
+  perTransactionMaxPhpDecimals: number;
+}
+export interface RemitHistoryItem {
+  transactionId: string;
+  status: string;
+  destRail: string | null;
+  destHandle: string | null;
+  destRecipientName: string | null;
+  amountUsdc: string;
+  amountPhp: string | null;
+  transfiOrderId: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  authorizedAt: string | null;
+  completedAt: string | null;
+}
+export interface RemitDetail extends RemitHistoryItem {
+  quoteId: string | null;
+  fees: { transfiFeeUsdc: string; ourFeeUsdc: string } | null;
+  timeline: { description: string; postedAt: string }[];
+}
+export interface QuoteBody {
+  destRail: string;
+  destHandle?: string | null;
+  destHandleStructured?: {
+    bankCode: string;
+    accountNumber: string;
+    accountHolderName: string;
+  } | null;
+  destRecipientName?: string | null;
+  amountUsdc?: string | null;
+  amountPhp?: string | null;
+  clientIdempotencyKey?: string | null;
+}
+export interface RemitConfirmResponse {
+  transactionId: string;
+  transfiOrderId: string;
+  status: string;
+  delivery: { rail: string; handle: string; estimateMinutes: string };
 }
 
 export const api = {
@@ -432,6 +532,39 @@ export const api = {
       idempotencyKey,
     }),
 
+  // ── Remit ──
+  getDestinations: () =>
+    request<{ destinations: RemitDestination[] }>("/v1/remit/destinations", { auth: true }),
+  createQuote: (body: QuoteBody) =>
+    request<{ quote: RemitQuote }>("/v1/remit/quote", { method: "POST", body, auth: true }),
+  getQuote: (id: string) =>
+    request<{ quote: RemitQuote }>(`/v1/remit/quotes/${id}`, { auth: true }),
+  cancelQuote: (quoteId: string) =>
+    request<{ quoteId: string; status: string }>("/v1/remit/cancel", {
+      method: "POST",
+      body: { quoteId },
+      auth: true,
+    }),
+  getRemitLimits: () => request<RemitLimits>("/v1/remit/limits", { auth: true }),
+  confirmRemit: (quoteId: string, idempotencyKey: string) =>
+    request<RemitConfirmResponse>("/v1/remit/confirm", {
+      method: "POST",
+      body: { quoteId },
+      auth: true,
+      idempotencyKey,
+    }),
+  getRemitHistory: (query?: { limit?: number; cursor?: string }) => {
+    const qs = new URLSearchParams();
+    if (query?.limit) qs.set("limit", String(query.limit));
+    if (query?.cursor) qs.set("cursor", query.cursor);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ remits: RemitHistoryItem[]; nextCursor: string | null }>(
+      `/v1/remit/history${suffix}`,
+      { auth: true },
+    );
+  },
+  getRemitDetail: (id: string) => request<RemitDetail>(`/v1/remit/${id}`, { auth: true }),
+
   // ── Ledger ──
   getBalance: () => request<BalanceResponse>("/v1/balance", { auth: true }),
   getTransactions: (query?: { limit?: number; cursor?: string; kind?: string[] }) => {
@@ -442,4 +575,6 @@ export const api = {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return request<TransactionsResponse>(`/v1/transactions${suffix}`, { auth: true });
   },
+  getTransaction: (id: string) =>
+    request<TransactionDetail>(`/v1/transactions/${id}`, { auth: true }),
 };

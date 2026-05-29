@@ -36,6 +36,22 @@ export default function KycVerify() {
   // Simulated dev page (fake KYC): no real capture, so skip the camera gate.
   const simulated = fullUrl?.startsWith("data:") ?? false;
 
+  // WKWebView routes a `data:` URI through `loadFileURL:` (which only accepts
+  // file://) → uncaught NSException → SIGABRT. So for the simulated page we decode
+  // the inline HTML and render it via source={{ html }} (loadHTMLString). Real
+  // https hosted-flow links keep using source={{ uri }}.
+  const simulatedHtml = useMemo(() => {
+    if (!simulated || !fullUrl) return null;
+    const comma = fullUrl.indexOf(",");
+    if (comma === -1) return null;
+    const payload = fullUrl.slice(comma + 1);
+    try {
+      return decodeURIComponent(payload);
+    } catch {
+      return payload;
+    }
+  }, [simulated, fullUrl]);
+
   if (!fullUrl) {
     return (
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
@@ -83,7 +99,7 @@ export default function KycVerify() {
       </View>
       <View style={styles.flex}>
         <WebView
-          source={{ uri: fullUrl }}
+          source={simulatedHtml != null ? { html: simulatedHtml } : { uri: fullUrl }}
           onLoadEnd={() => setLoading(false)}
           onError={() => setLoading(false)}
           onHttpError={() => setLoading(false)}

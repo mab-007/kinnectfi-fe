@@ -1,12 +1,16 @@
 import { type ReactNode } from "react";
-import { StyleSheet, View } from "react-native";
+import { Keyboard, StyleSheet, TouchableWithoutFeedback, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, spacing } from "@/lib/theme";
 
 export function Screen({ children }: { children: ReactNode }) {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <View style={styles.body}>{children}</View>
+      {/* Tapping anywhere outside a text field dismisses the keyboard. Interactive
+          children (inputs, buttons) still receive their own taps. */}
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View style={styles.body}>{children}</View>
+      </TouchableWithoutFeedback>
     </SafeAreaView>
   );
 }

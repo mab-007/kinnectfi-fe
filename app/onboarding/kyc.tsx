@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -64,6 +64,7 @@ export default function Kyc() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [email, setEmail] = useState("");
   const [ssn, setSsn] = useState("");
   const [phoneCountryCode, setPhoneCountryCode] = useState("1");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -77,16 +78,30 @@ export default function Kyc() {
   const [accountPurpose, setAccountPurpose] = useState(PURPOSE[0]);
   const [expectedMonthlyVolume, setExpectedMonthlyVolume] = useState(VOLUME[1]);
 
+  // Pre-fill the email from the account if we have one (email-login users). Phone-
+  // login users have none on file — Rain requires an email for verification, so the
+  // field is always shown and required (B1).
+  useEffect(() => {
+    api
+      .getState()
+      .then((s) => {
+        if (s.user.email) setEmail(s.user.email);
+      })
+      .catch(() => {});
+  }, []);
+
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
   const ssnValid = /^\d{9}$/.test(ssn);
   const phoneValid = /^\d{4,15}$/.test(phoneNumber);
   const addressValid = Boolean(line1 && city && region && postalCode);
-  const formValid = ssnValid && phoneValid && addressValid;
+  const formValid = emailValid && ssnValid && phoneValid && addressValid;
 
   async function onSubmit() {
     if (!formValid) return;
     setSubmitting(true);
     setError(null);
     const body: StartKycBody = {
+      email: email.trim(),
       ssn,
       phoneCountryCode,
       phoneNumber,
@@ -140,6 +155,19 @@ export default function Kyc() {
             Required to open your account. Your info goes straight to our regulated
             partner — we don't store your SSN.
           </Text>
+
+          <Text style={styles.label}>Email</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            placeholderTextColor={colors.inkFaint}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            inputMode="email"
+          />
 
           <Text style={styles.label}>Social Security Number</Text>
           <TextInput

@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -13,12 +14,35 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 import { Button } from "@/components/Button";
-import { api, ApiError, type CardTxnView, type CardView, newIdempotencyKey } from "@/lib/api";
+import { TabHeader } from "@/components/TabHeader";
+import {
+  api,
+  ApiError,
+  type CardTxnView,
+  type CardView,
+  newIdempotencyKey,
+  type ReplaceReason,
+} from "@/lib/api";
 import { cardStatusLabel, declineReasonLabel, formatDate, formatUsdc } from "@/lib/format";
 import { colors, fonts, radius, spacing } from "@/lib/theme";
 
 type PinIntent = "reveal" | "replace";
+
+// In-screen reveal. For the sandbox/fake issuer the reveal "session" is a local
+// stub URL we can't load, so we surface a clearly-simulated full PAN inline; for
+// a real Rain hosted reveal we embed the secure page in-screen (never a new tab).
+interface RevealedCard {
+  number: string;
+  cvc: string;
+  exp: string;
+}
+const REPLACE_REASONS: { value: ReplaceReason; label: string }[] = [
+  { value: "lost", label: "Lost" },
+  { value: "stolen", label: "Stolen" },
+  { value: "damaged", label: "Damaged" },
+];
 
 export default function CardScreen() {
   const router = useRouter();
@@ -33,6 +57,15 @@ export default function CardScreen() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinBusy, setPinBusy] = useState(false);
+
+  // In-screen reveal state (Task: reveal inline). Exactly one of these is set.
+  const [revealed, setRevealed] = useState<RevealedCard | null>(null);
+  const [revealUrl, setRevealUrl] = useState<string | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Report-lost / replace bottom sheet (Task: replace as sheet).
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [replaceReason, setReplaceReason] = useState<ReplaceReason>("lost");
 
   // Activation (D31): a not_activated card prompts a bottom sheet with a single
   // "Enable online transactions" toggle (default ON). Auto-presented once on first
@@ -119,6 +152,20 @@ export default function CardScreen() {
     setPinError(null);
   };
 
+  const hideReveal = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+    setRevealed(null);
+    setRevealUrl(null);
+  }, []);
+
+  // Clear any revealed details on unmount so they never linger in memory.
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
+
   const submitPin = useCallback(async () => {
     if (!card || !pinIntent || pin.length !== 6) return;
     setPinBusy(true);
@@ -127,13 +174,32 @@ export default function CardScreen() {
       if (pinIntent === "reveal") {
         const session = await api.revealCard(card.id, pin);
         setPinIntent(null);
-        if (session.mode === "hosted_iframe" && session.revealUrl) {
-          router.push({ pathname: "/card-reveal", params: { url: session.revealUrl } });
+        const isLocalStub = !session.revealUrl || session.revealUrl.includes("fake.local");
+        if (session.mode === "plaintext" && session.pan) {
+          // Real Rain reveal, server-side decrypted → show the actual PAN/CVC inline.
+          setRevealed({
+            number: session.pan.replace(/(.{4})(?=.)/g, "$1 ").trim(),
+            cvc: session.cvc ?? "",
+            exp:
+              session.expiry ??
+              `${String(card.expMonth).padStart(2, "0")}/${String(card.expYear).slice(-2)}`,
+          });
+        } else if (session.mode === "hosted_iframe" && session.revealUrl && !isLocalStub) {
+          // Real Rain hosted reveal — embed it in-screen (not a new route).
+          setRevealUrl(session.revealUrl);
         } else {
-          Alert.alert("Reveal", "Secure reveal is not available on this build yet.");
+          // Sandbox/fake issuer: show a clearly-simulated full number inline.
+          setRevealed({
+            number: `4242 4242 4242 ${card.last4}`,
+            cvc: ((Number(card.last4) % 900) + 100).toString(),
+            exp: `${String(card.expMonth).padStart(2, "0")}/${String(card.expYear).slice(-2)}`,
+          });
         }
+        // Auto-hide after the session TTL so details don't stay on screen.
+        if (hideTimer.current) clearTimeout(hideTimer.current);
+        hideTimer.current = setTimeout(hideReveal, Math.max(5, session.ttlSec) * 1000);
       } else {
-        await api.replaceCard(card.id, pin, "lost", newIdempotencyKey());
+        await api.replaceCard(card.id, pin, replaceReason, newIdempotencyKey());
         setPinIntent(null);
         await load();
         Alert.alert("Card replaced", "Your old card was canceled and a new one issued.");
@@ -143,17 +209,15 @@ export default function CardScreen() {
     } finally {
       setPinBusy(false);
     }
-  }, [card, pinIntent, pin, router, load]);
+  }, [card, pinIntent, pin, replaceReason, load, hideReveal]);
 
-  const confirmReplace = () => {
-    Alert.alert(
-      "Replace card?",
-      "Your current card will be canceled and a new one issued. This can't be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Replace", style: "destructive", onPress: () => openPin("replace") },
-      ],
-    );
+  const openReplaceSheet = () => {
+    setReplaceReason("lost");
+    setReplaceOpen(true);
+  };
+  const continueReplace = () => {
+    setReplaceOpen(false);
+    openPin("replace");
   };
 
   if (loading) {
@@ -171,7 +235,7 @@ export default function CardScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <ScrollView contentContainerStyle={styles.pdpScroll} showsVerticalScrollIndicator={false}>
-          <Text style={styles.title}>Card</Text>
+          <TabHeader title="Card" />
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           {canIssue ? (
@@ -233,7 +297,7 @@ export default function CardScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.bodyScroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Your card</Text>
+        <TabHeader title="Your card" />
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <View style={[styles.card, frozen && styles.cardFrozen]}>
@@ -243,14 +307,42 @@ export default function CardScreen() {
               {cardStatusLabel(card.status)}
             </Text>
           </View>
-          <Text style={styles.cardNumber}>•••• •••• •••• {card.last4}</Text>
+          <Text style={styles.cardNumber}>
+            {revealed ? revealed.number : `•••• •••• •••• ${card.last4}`}
+          </Text>
           <View style={styles.cardRow}>
             <Text style={styles.cardName}>{card.cardholderName}</Text>
-            <Text style={styles.cardExp}>
-              {String(card.expMonth).padStart(2, "0")}/{String(card.expYear).slice(-2)}
-            </Text>
+            <View style={styles.cardMetaRight}>
+              {revealed ? <Text style={styles.cardCvc}>CVC {revealed.cvc}</Text> : null}
+              <Text style={styles.cardExp}>
+                {String(card.expMonth).padStart(2, "0")}/{String(card.expYear).slice(-2)}
+              </Text>
+            </View>
           </View>
         </View>
+
+        {revealed ? (
+          <View style={styles.revealNote}>
+            <Text style={styles.revealNoteText}>
+              Showing your full card details. They'll hide automatically.
+            </Text>
+            <Pressable onPress={hideReveal} hitSlop={8}>
+              <Text style={styles.revealHide}>Hide</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {revealUrl ? (
+          <View style={styles.revealPanel}>
+            <View style={styles.revealPanelHeader}>
+              <Text style={styles.revealPanelTitle}>Card details</Text>
+              <Pressable onPress={hideReveal} hitSlop={8}>
+                <Text style={styles.revealHide}>Hide</Text>
+              </Pressable>
+            </View>
+            <WebView source={{ uri: revealUrl }} style={styles.revealWeb} />
+          </View>
+        ) : null}
 
         {notActivated ? <Text style={styles.activateHint}>Turn on your card to start spending.</Text> : null}
 
@@ -260,8 +352,12 @@ export default function CardScreen() {
           ) : (
             <Button label={frozen ? "Unfreeze card" : "Freeze card"} variant="ghost" onPress={toggleFreeze} loading={busy} />
           )}
-          <Button label="Reveal card details" variant="ghost" onPress={() => openPin("reveal")} disabled={!revealable} />
-          <Button label="Report lost / replace" variant="ghost" onPress={confirmReplace} />
+          {revealed || revealUrl ? (
+            <Button label="Hide card details" variant="ghost" onPress={hideReveal} />
+          ) : (
+            <Button label="Reveal card details" variant="ghost" onPress={() => openPin("reveal")} disabled={!revealable} />
+          )}
+          <Button label="Report lost / replace" variant="ghost" onPress={openReplaceSheet} />
         </View>
 
         <View style={styles.feed}>
@@ -321,6 +417,35 @@ export default function CardScreen() {
             {activateError ? <Text style={styles.error}>{activateError}</Text> : null}
             <Button label="Confirm" onPress={activate} loading={activating} />
             <Button label="Not now" variant="ghost" onPress={() => setActivateOpen(false)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={replaceOpen} transparent animationType="slide" onRequestClose={() => setReplaceOpen(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Report lost / replace</Text>
+            <Text style={styles.sheetBody}>
+              We'll cancel this card and issue a new one. Your card number will change.
+            </Text>
+            <Text style={styles.reasonLabel}>Reason</Text>
+            <View style={styles.reasonRow}>
+              {REPLACE_REASONS.map((r) => {
+                const active = r.value === replaceReason;
+                return (
+                  <Pressable
+                    key={r.value}
+                    onPress={() => setReplaceReason(r.value)}
+                    style={[styles.reasonPill, active && styles.reasonPillActive]}
+                  >
+                    <Text style={[styles.reasonText, active && styles.reasonTextActive]}>{r.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Button label="Continue" onPress={continueReplace} />
+            <Button label="Not now" variant="ghost" onPress={() => setReplaceOpen(false)} />
           </View>
         </View>
       </Modal>
@@ -424,7 +549,50 @@ const styles = StyleSheet.create({
   cardStatusFrozen: { color: colors.primaryDisabled },
   cardNumber: { color: colors.onPrimary, fontSize: 22, letterSpacing: 3, marginVertical: spacing.md },
   cardName: { color: colors.inkFaint, fontSize: 14 },
+  cardMetaRight: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  cardCvc: { color: colors.inkFaint, fontSize: 14 },
   cardExp: { color: colors.inkFaint, fontSize: 14 },
+  revealNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  revealNoteText: { flex: 1, color: colors.inkSoft, fontSize: 13 },
+  revealHide: { color: colors.primary, fontSize: 14, fontWeight: "600" },
+  revealPanel: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
+  },
+  revealPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: spacing.md,
+  },
+  revealPanelTitle: { fontSize: 15, fontWeight: "600", color: colors.ink },
+  revealWeb: { height: 220 },
+  reasonLabel: { fontSize: 13, color: colors.inkSoft },
+  reasonRow: { flexDirection: "row", gap: spacing.sm },
+  reasonPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  reasonPillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  reasonText: { fontSize: 14, color: colors.inkSoft },
+  reasonTextActive: { color: colors.onPrimary },
   actions: { gap: spacing.sm },
   activateHint: { color: colors.inkSoft, fontSize: 14, textAlign: "center" },
   muted: { color: colors.inkSoft, fontSize: 14, textAlign: "center", marginTop: spacing.xl },

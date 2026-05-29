@@ -22,6 +22,40 @@ export function formatPhpFromUsdcMinor(minor: string, rate = PHP_PER_USD): strin
   return `₱${php.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** PHP minor-unit string (2dp) → "₱1,234.56". Negative-safe. */
+export function formatPhp(minor: string, decimals = 2): string {
+  const neg = minor.startsWith("-");
+  const digits = (neg ? minor.slice(1) : minor).padStart(decimals + 1, "0");
+  const whole = digits.slice(0, digits.length - decimals);
+  const frac = digits.slice(digits.length - decimals).padEnd(decimals, "0");
+  const wholeGrouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${neg ? "-" : ""}₱${wholeGrouped}.${frac}`;
+}
+
+const REMIT_STATUS_LABELS: Record<string, string> = {
+  authorized: "Sending",
+  pending: "Sending",
+  confirming: "Sending",
+  completed: "Delivered",
+  failed: "Failed",
+  reversed: "Refunded",
+};
+export function remitStatusLabel(status: string): string {
+  return REMIT_STATUS_LABELS[status] ?? status.replace(/_/g, " ");
+}
+
+const REMIT_RAIL_LABELS: Record<string, string> = {
+  gcash: "GCash",
+  maya: "Maya",
+  bank_instapay: "Bank (InstaPay)",
+  bank_pesonet: "Bank (PESONet)",
+  qr_ph: "QR Ph",
+};
+export function remitRailLabel(rail?: string | null): string {
+  if (!rail) return "Recipient";
+  return REMIT_RAIL_LABELS[rail] ?? rail.replace(/_/g, " ");
+}
+
 export function initialsOf(first?: string | null, last?: string | null): string {
   const a = (first ?? "").trim()[0] ?? "";
   const b = (last ?? "").trim()[0] ?? "";

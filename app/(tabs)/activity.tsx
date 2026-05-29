@@ -1,12 +1,12 @@
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { TabHeader } from "@/components/TabHeader";
 import { api, ApiError, type TxView } from "@/lib/api";
 import { formatDate, formatUsdc, txLabel } from "@/lib/format";
-import { colors, fonts, spacing } from "@/lib/theme";
+import { colors, spacing } from "@/lib/theme";
 
-const INCOMING = new Set(["fund_in", "crypto_deposit", "yield_accrual"]);
 const PAGE = 25;
 
 export default function Activity() {
@@ -23,17 +23,23 @@ export default function Activity() {
     setCursor(res.nextCursor);
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        await loadPage();
-      } catch (e) {
-        setError(e instanceof ApiError ? e.message : "Couldn't load activity.");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [loadPage]);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          await loadPage();
+        } catch (e) {
+          if (active) setError(e instanceof ApiError ? e.message : "Couldn't load activity.");
+        } finally {
+          if (active) setLoading(false);
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, [loadPage]),
+  );
 
   const onEnd = useCallback(async () => {
     if (!cursor || loadingMore) return;
@@ -48,13 +54,9 @@ export default function Activity() {
   }, [cursor, loadingMore, loadPage]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Text style={styles.back}>‹ Back</Text>
-        </Pressable>
-        <Text style={styles.title}>Activity</Text>
-        <View style={{ width: 48 }} />
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.headerWrap}>
+        <TabHeader title="Activity" />
       </View>
 
       {loading ? (
@@ -75,9 +77,9 @@ export default function Activity() {
           ListEmptyComponent={<Text style={styles.muted}>No activity yet.</Text>}
           ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.md }} /> : null}
           renderItem={({ item }) => {
-            const incoming = INCOMING.has(item.kind);
+            const incoming = item.direction === "credit";
             return (
-              <View style={styles.row}>
+              <Pressable style={styles.row} onPress={() => router.push(`/tx/${item.id}`)}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>{txLabel(item.kind)}</Text>
                   <Text style={styles.meta}>
@@ -88,7 +90,7 @@ export default function Activity() {
                   {incoming ? "+" : "-"}
                   {formatUsdc(item.grossAmount)}
                 </Text>
-              </View>
+              </Pressable>
             );
           }}
         />
@@ -100,15 +102,7 @@ export default function Activity() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  back: { color: colors.primary, fontSize: 16, width: 48 },
-  title: { fontFamily: fonts.serif, fontSize: 20, color: colors.ink },
+  headerWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xs },
   body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
   row: {
     flexDirection: "row",
@@ -120,7 +114,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 15, color: colors.ink },
   meta: { fontSize: 12, color: colors.inkFaint, marginTop: 2, textTransform: "capitalize" },
   amount: { fontSize: 15, fontWeight: "600" },
-  in: { color: colors.ink },
+  in: { color: colors.success },
   out: { color: colors.inkSoft },
   muted: { color: colors.inkSoft, fontSize: 14, textAlign: "center", marginTop: spacing.xl },
   error: { color: colors.danger, fontSize: 13, textAlign: "center" },

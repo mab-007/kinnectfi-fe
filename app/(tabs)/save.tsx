@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/components/Button";
+import { TabHeader } from "@/components/TabHeader";
 import { api, ApiError, newIdempotencyKey, type YieldStatusResponse } from "@/lib/api";
 import { formatUsdc } from "@/lib/format";
 import { colors, fonts, radius, spacing } from "@/lib/theme";
@@ -104,7 +105,7 @@ export default function Save() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <View style={styles.body}>
-          <Text style={styles.title}>Save</Text>
+          <TabHeader title="Save" />
           <View style={styles.center}>
             <Ionicons name="trending-up-outline" size={48} color={colors.primary} />
             <Text style={styles.headline}>Earn on idle dollars.</Text>
@@ -134,7 +135,7 @@ export default function Save() {
           />
         }
       >
-        <Text style={styles.title}>Save</Text>
+        <TabHeader title="Save" />
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {!status.eligible ? (

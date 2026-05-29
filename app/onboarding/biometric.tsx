@@ -6,6 +6,7 @@ import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-nativ
 import { Button } from "@/components/Button";
 import { Screen } from "@/components/Screen";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
+import { markUnlocked, setAppLockEnabled } from "@/lib/applock";
 import { colors, fonts, spacing } from "@/lib/theme";
 
 // Optional, non-gating step shown right after ToS: offer to turn on device
@@ -75,6 +76,10 @@ export default function Biometric() {
         return;
       }
       await api.enrollBiometric(await getDeviceId(), idempotencyKey);
+      // Turn on the cold-start app-lock; the user just authenticated, so this
+      // launch stays unlocked — the lock kicks in on the next launch.
+      await setAppLockEnabled(true);
+      markUnlocked();
       goToDone();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong.");

@@ -7,7 +7,7 @@ import { colors, fonts, radius, spacing } from "@/lib/theme";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
-export default function More() {
+export default function Menu() {
   const router = useRouter();
   const { logout } = useSession();
 
@@ -26,13 +26,23 @@ export default function More() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Text style={styles.back}>‹ Back</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>Account</Text>
+        <View style={{ width: 48 }} />
+      </View>
+
       <View style={styles.body}>
-        <Text style={styles.title}>More</Text>
         <View style={styles.group}>
           <Row icon="person-circle-outline" label="Profile" onPress={() => router.push("/profile")} />
-          <Row icon="time-outline" label="Activity" onPress={() => router.push("/activity")} />
-          <Row icon="help-circle-outline" label="Help & support" onPress={() => Alert.alert("Help", "Support is coming soon.")} />
+          <Row
+            icon="help-circle-outline"
+            label="Help & support"
+            onPress={() => Alert.alert("Help", "Support is coming soon.")}
+          />
         </View>
         <View style={styles.group}>
           <Row icon="log-out-outline" label="Log out" danger onPress={confirmLogout} />
@@ -64,8 +74,16 @@ function Row({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  back: { color: colors.primary, fontSize: 16, width: 48 },
+  headerTitle: { fontFamily: fonts.serif, fontSize: 20, color: colors.ink },
   body: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.lg },
-  title: { fontFamily: fonts.serif, fontSize: 26, color: colors.ink },
   group: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,
